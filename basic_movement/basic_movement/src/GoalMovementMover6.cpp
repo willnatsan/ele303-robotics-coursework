@@ -35,6 +35,8 @@ public:
 		: Node("GoalMovementMover6"), count_(0)
 	{
 		// RCLCPP_INFO(this->get_logger(),"Constructor");
+		current_joints.resize(6, 0.0f);
+		demanded_joints.resize(6, 0.0f);
 		cb_group_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
 		tm_group_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
 		rclcpp::SubscriptionOptions options;
@@ -42,10 +44,9 @@ public:
 		publisherJointPosition_ = this->create_publisher<control_msgs::msg::JointJog>("/JointJog", 10);
 		subscriptionJointPosition_ = this->create_subscription<sensor_msgs::msg::JointState>("/joint_states", 10, std::bind(&GoalMovementMover6::topic_jointStatesCallback, this, _1), options);
 		subscriptionJointDemands_ = this->create_subscription<std_msgs::msg::Float32MultiArray>("/joint_demands", 10, std::bind(&GoalMovementMover6::topic_jointDemandsCallback, this, _1), options);
-		timer_ = this->create_wall_timer(20ms, std::bind(&GoalMovementMover6::timer_callback, this), tm_group_);
+		timer_ = this->create_wall_timer(100ms, std::bind(&GoalMovementMover6::timer_callback, this), tm_group_);
 	}
 
-protected:
 private:
 	void timer_callback()
 	{
@@ -53,6 +54,10 @@ private:
 	}
 	void topic_jointStatesCallback(const sensor_msgs::msg::JointState::SharedPtr msg)
 	{
+		if (msg->position.size() < 6) {
+        	return;
+    	}
+
 		for (int i = 0; i < 6; i++)
 		{
 			current_joints[i] = msg->position[i];
@@ -62,6 +67,10 @@ private:
 	}
 	void topic_jointDemandsCallback(const std_msgs::msg::Float32MultiArray::SharedPtr msg)
 	{
+		if (msg->data.size() < 6) {
+        	return;
+    	}
+
 		for (int i = 0; i < 6; i++)
 		{
 			demanded_joints[i] = msg->data[i];
