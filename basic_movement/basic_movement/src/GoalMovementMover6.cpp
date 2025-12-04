@@ -25,6 +25,10 @@
 using std::placeholders::_1;
 using namespace std::chrono_literals;
 
+struct PolynomialCoeffs
+{
+	double a0, a1, a2, a3, a4, a5;
+};
 
 class GoalMovementMover6 : public rclcpp::Node
 {
@@ -46,15 +50,41 @@ public:
 	}
 
 private:
+	PolynomialCoeffs get_coeffs(double q_curr, double q_target, double T)
+	{
+		PolynomialCoeffs coeffs;
+
+		coeffs.a0 = q_curr;
+		coeffs.a1 = 0.0;
+		coeffs.a2 = 0.0;
+		coeffs.a3 = 10.0 * (q_target - q_curr) / std::pow(T, 3);
+		coeffs.a4 = -15.0 * (q_target - q_curr) / std::pow(T, 4);
+		coeffs.a5 = 6 * (q_target - q_curr) / std::pow(T, 5);
+
+		return coeffs;
+	}
+
+	double get_position(const PolynomialCoeffs &coeffs, double t)
+	{
+		return coeffs.a0 + coeffs.a1 * t + coeffs.a2 * std::pow(t, 2) + coeffs.a3 * std::pow(t, 3) + coeffs.a4 * std::pow(t, 4) + coeffs.a5 * std::pow(t, 5);
+	}
+
+	double get_velocity(const PolynomialCoeffs &coeffs, double t)
+	{
+		return coeffs.a1 + 2 * coeffs.a2 * t + 3 * coeffs.a3 * std::pow(t, 2) + 4 * coeffs.a4 * std::pow(t, 3) + 5 * coeffs.a5 * std::pow(t, 4);
+	}
+
 	void timer_callback()
 	{
 		move_my_robot();
 	}
+
 	void topic_jointStatesCallback(const sensor_msgs::msg::JointState::SharedPtr msg)
 	{
-		if (msg->position.size() < 6) {
-        	return;
-    	}
+		if (msg->position.size() < 6)
+		{
+			return;
+		}
 
 		for (int i = 0; i < 6; i++)
 		{
@@ -63,18 +93,66 @@ private:
 		known_states = true;
 		// RCLCPP_INFO(this->get_logger(),"Received State %f\t%f\t%f\t%f\t%f\t%f", joint1_angle, joint2_angle, joint3_angle, joint4_angle, joint5_angle, joint6_angle);
 	}
+
 	void topic_jointDemandsCallback(const std_msgs::msg::Float32MultiArray::SharedPtr msg)
 	{
-		if (msg->data.size() < 6) {
-        	return;
-    	}
+		if (msg->data.size() < 6)
+		{
+			return;
+		}
 
+		bool demands_changed = false;
 		for (int i = 0; i < 6; i++)
 		{
-			demanded_joints[i] = msg->data[i];
+			if (std::abs(demanded_joints[i] - msg->data[i]) > 1e-6)
+			{
+				demanded_joints[i] = msg->data[i];
+				demands_changed = true;
+			}
 		}
+
+		if (demands_changed && known_states)
+		{
+			this->start_new_trajectory();
+		}
+
 		known_demands = true;
 	}
+
+	void start_new_trajectory()
+	{
+		// Calculate maximum error to determine trajectory duration double max_error = 0.0;
+		double max_error = 0.0;
+		for (int i = 0; i < 6; i++)
+		{
+			double error = std::abs(demanded_joints[i] - current_joints[i]);
+			max_error = std::max(error, max_error);
+		}
+
+		// Set trajectory duration based on max error
+		// Adjust this factor to control overall speed
+		double max_speed = 0.5;										// rad/s
+		trajectory_duration = std::max(max_error / max_speed, 0.5); // Minimum 0.5 seconds
+
+		// Store start positions and calculate coefficients for each joint
+		for (int i = 0; i < 6; i++)
+		{
+			trajectory_start_positions[i] = current_joints[i];
+			coeffs[i] = get_coeffs(
+				current_joints[i],
+				demanded_joints[i],
+				trajectory_duration);
+		}
+
+		// Record start time
+		trajectory_start_time = this->now();
+		trajectory_active = true;
+
+		RCLCPP_INFO(this->get_logger(),
+					"Starting new trajectory, duration: %.2f seconds",
+					trajectory_duration);
+	}
+
 	void send_msg(const std::vector<double> &vels)
 	{
 		auto msg = control_msgs::msg::JointJog();
@@ -83,6 +161,7 @@ private:
 
 		publisherJointPosition_->publish(msg);
 	}
+
 	void move_my_robot()
 	{
 		if (!known_states || !known_demands)
@@ -90,39 +169,51 @@ private:
 			return;
 		}
 
-		double tolerance = 0.05;
-		double max_speed = 0.5;
-
-		std::vector<double> errors(6);
 		std::vector<double> velocities(6, 0.0);
-		double max_err = 0.0;
 
-		// Calculate All Joint Errors -> Find Max Error
-		for (int i = 0; i < 6; i++)
+		if (!trajectory_active)
 		{
-			errors[i] = demanded_joints[i] - current_joints[i];
-			max_err = std::max(abs(errors[i]), max_err);
-		}
-
-		// Stop if Max Error < Tolerance
-		if (max_err < tolerance)
-		{
+			// No active trajectory, send zero velocities
 			send_msg(velocities);
 			return;
 		}
 
-		// Stop if Calculated Time to Target < 0.001
-		double time = max_err / max_speed;
-		if (time < 0.001)
+		// Calculate elapsed time
+		double elapsed = (this->now() - trajectory_start_time).seconds();
+
+		// Check if trajectory is complete
+		if (elapsed >= trajectory_duration)
 		{
+			// Trajectory finished
+			trajectory_active = false;
+
+			// Check if we're close enough to target
+			double max_error = 0.0;
+			for (int i = 0; i < 6; i++)
+			{
+				double error = std::abs(demanded_joints[i] - current_joints[i]);
+				max_error = std::max(error, max_error);
+			}
+
+			if (max_error < 0.01)
+			{
+				RCLCPP_INFO(this->get_logger(), "Trajectory complete, at target");
+			}
+			else
+			{
+				RCLCPP_WARN(this->get_logger(),
+							"Trajectory complete but error remains: %.4f rad",
+							max_error);
+			}
+
 			send_msg(velocities);
 			return;
 		}
 
-		// Calculate Proportional Velocities for All Joints
+		// Calculate desired velocities from quintic trajectory
 		for (int i = 0; i < 6; i++)
 		{
-			velocities[i] = errors[i] / time;
+			velocities[i] = get_velocity(coeffs[i], elapsed);
 		}
 
 		send_msg(velocities);
@@ -130,15 +221,22 @@ private:
 
 	bool known_states = false;
 	bool known_demands = false;
+	bool trajectory_active = false;
+
 	std::vector<float> current_joints;
 	std::vector<float> demanded_joints;
+	std::vector<float> trajectory_start_positions;
+	std::vector<PolynomialCoeffs> coeffs;
+
+	rclcpp::Time trajectory_start_time;
+	double trajectory_duration;
+
 	rclcpp::CallbackGroup::SharedPtr cb_group_;
 	rclcpp::CallbackGroup::SharedPtr tm_group_;
 	rclcpp::TimerBase::SharedPtr timer_;
 	rclcpp::Publisher<control_msgs::msg::JointJog>::SharedPtr publisherJointPosition_;
 	rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr subscriptionJointPosition_;
 	rclcpp::Subscription<std_msgs::msg::Float32MultiArray>::SharedPtr subscriptionJointDemands_;
-	unsigned long long state = 0;
 	size_t count_;
 };
 
