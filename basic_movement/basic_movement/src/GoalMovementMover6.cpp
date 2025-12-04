@@ -37,7 +37,9 @@ public:
 		: Node("GoalMovementMover6"), count_(0)
 	{
 		// RCLCPP_INFO(this->get_logger(),"Constructor");
-		kp = 3; // Proportional gain for position error correction
+		kp = 3.5; // Proportional gain for position error correction
+		dt = 0.01; // Time step for control loop (seconds)
+
 		current_joints.resize(6, 0.0f);
 		demanded_joints.resize(6, 0.0f);
 		trajectory_start_positions.resize(6, 0.0f);
@@ -135,7 +137,7 @@ private:
 		// Set trajectory duration based on max error
 		// Adjust this factor to control overall speed
 		double max_speed = 0.25;										// rad/s
-		trajectory_duration = std::max(max_error / max_speed, 5.0); // Minimum 0.5 seconds
+		trajectory_duration = std::max(max_error / max_speed, 5.0); // Minimum 5 seconds
 
 		// Store start positions and calculate coefficients for each joint
 		for (int i = 0; i < 6; i++)
@@ -223,6 +225,7 @@ private:
 	}
 
 	double kp;
+	double dt;
 
 	bool known_states = false;
 	bool known_demands = false;
