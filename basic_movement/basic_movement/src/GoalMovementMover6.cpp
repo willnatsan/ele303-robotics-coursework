@@ -37,8 +37,11 @@ public:
 		: Node("GoalMovementMover6"), count_(0)
 	{
 		// RCLCPP_INFO(this->get_logger(),"Constructor");
+		kp = 3; // Proportional gain for position error correction
 		current_joints.resize(6, 0.0f);
 		demanded_joints.resize(6, 0.0f);
+		trajectory_start_positions.resize(6, 0.0f);
+		coeffs.resize(6);
 		cb_group_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
 		tm_group_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
 		rclcpp::SubscriptionOptions options;
@@ -46,7 +49,7 @@ public:
 		publisherJointPosition_ = this->create_publisher<control_msgs::msg::JointJog>("/JointJog", 10);
 		subscriptionJointPosition_ = this->create_subscription<sensor_msgs::msg::JointState>("/joint_states", 10, std::bind(&GoalMovementMover6::topic_jointStatesCallback, this, _1), options);
 		subscriptionJointDemands_ = this->create_subscription<std_msgs::msg::Float32MultiArray>("/joint_demands", 10, std::bind(&GoalMovementMover6::topic_jointDemandsCallback, this, _1), options);
-		timer_ = this->create_wall_timer(100ms, std::bind(&GoalMovementMover6::timer_callback, this), tm_group_);
+		timer_ = this->create_wall_timer(10ms, std::bind(&GoalMovementMover6::timer_callback, this), tm_group_);
 	}
 
 private:
@@ -131,8 +134,8 @@ private:
 
 		// Set trajectory duration based on max error
 		// Adjust this factor to control overall speed
-		double max_speed = 0.5;										// rad/s
-		trajectory_duration = std::max(max_error / max_speed, 0.5); // Minimum 0.5 seconds
+		double max_speed = 0.25;										// rad/s
+		trajectory_duration = std::max(max_error / max_speed, 5.0); // Minimum 0.5 seconds
 
 		// Store start positions and calculate coefficients for each joint
 		for (int i = 0; i < 6; i++)
@@ -195,7 +198,7 @@ private:
 				max_error = std::max(error, max_error);
 			}
 
-			if (max_error < 0.01)
+			if (max_error < 0.05)
 			{
 				RCLCPP_INFO(this->get_logger(), "Trajectory complete, at target");
 			}
@@ -213,11 +216,13 @@ private:
 		// Calculate desired velocities from quintic trajectory
 		for (int i = 0; i < 6; i++)
 		{
-			velocities[i] = get_velocity(coeffs[i], elapsed);
+			velocities[i] = get_velocity(coeffs[i], elapsed) + kp * (get_position(coeffs[i], elapsed) - current_joints[i]);
 		}
 
 		send_msg(velocities);
 	}
+
+	double kp;
 
 	bool known_states = false;
 	bool known_demands = false;
