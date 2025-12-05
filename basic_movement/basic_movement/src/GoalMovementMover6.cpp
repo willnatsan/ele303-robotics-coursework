@@ -14,6 +14,7 @@
 
 #include <chrono>
 #include <memory>
+#include <mutex>
 #include <thread>
 #include <functional>
 #include <control_msgs/msg/joint_jog.hpp>
@@ -37,12 +38,18 @@ public:
 		: Node("GoalMovementMover6"), count_(0)
 	{
 		// RCLCPP_INFO(this->get_logger(),"Constructor");
-		kp = 3.5; // Proportional gain for position error correction
+		kp = 3.5;  // Proportional gain for position error correction
+		ki = 0.1;  // Integral gain
+		kd = 0.5;  // Derivative gain
 		dt = 0.01; // Time step for control loop (seconds)
+		errors_prev.resize(6, 0.0f);
+		errors_integral.resize(6, 0.0f);
+
+		integral_limit = 1.0 / ki;
 
 		current_joints.resize(6, 0.0f);
+		current_velocities.resize(6, 0.0f);
 		demanded_joints.resize(6, 0.0f);
-		trajectory_start_positions.resize(6, 0.0f);
 		coeffs.resize(6);
 		cb_group_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
 		tm_group_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
@@ -55,16 +62,19 @@ public:
 	}
 
 private:
-	PolynomialCoeffs get_coeffs(double q_curr, double q_target, double T)
+	PolynomialCoeffs get_coeffs(double q_start, double q_target, double v_start, double T)
 	{
 		PolynomialCoeffs coeffs;
+		double diff = q_target - q_start;
 
-		coeffs.a0 = q_curr;
-		coeffs.a1 = 0.0;
-		coeffs.a2 = 0.0;
-		coeffs.a3 = 10.0 * (q_target - q_curr) / std::pow(T, 3);
-		coeffs.a4 = -15.0 * (q_target - q_curr) / std::pow(T, 4);
-		coeffs.a5 = 6 * (q_target - q_curr) / std::pow(T, 5);
+		coeffs.a0 = q_start;
+		coeffs.a1 = v_start; // NEW: Start velocity is no longer hardcoded to 0
+		coeffs.a2 = 0.0;	 // Assuming 0 start acceleration
+
+		// Calculating based on assumption: v_final = 0 & accel_final = 0
+		coeffs.a3 = (10.0 * diff) / std::pow(T, 3) - (6.0 * v_start) / std::pow(T, 2);
+		coeffs.a4 = (-15.0 * diff) / std::pow(T, 4) + (8.0 * v_start) / std::pow(T, 3);
+		coeffs.a5 = (6.0 * diff) / std::pow(T, 5) - (3.0 * v_start) / std::pow(T, 4);
 
 		return coeffs;
 	}
@@ -91,9 +101,17 @@ private:
 			return;
 		}
 
+		double velocity_flag = false;
+		// Get current velocity if available
+		if (msg->velocity.size() >= 6)
+		{
+			velocity_flag = true;
+		}
+
 		for (int i = 0; i < 6; i++)
 		{
 			current_joints[i] = msg->position[i];
+			current_velocities[i] = (velocity_flag) ? msg->velocity[i] : 0.0;
 		}
 		known_states = true;
 		// RCLCPP_INFO(this->get_logger(),"Received State %f\t%f\t%f\t%f\t%f\t%f", joint1_angle, joint2_angle, joint3_angle, joint4_angle, joint5_angle, joint6_angle);
@@ -126,6 +144,8 @@ private:
 
 	void start_new_trajectory()
 	{
+		std::lock_guard<std::mutex> lock(trajectory_mutex); // Lock Data
+
 		// Calculate maximum error to determine trajectory duration double max_error = 0.0;
 		double max_error = 0.0;
 		for (int i = 0; i < 6; i++)
@@ -136,17 +156,21 @@ private:
 
 		// Set trajectory duration based on max error
 		// Adjust this factor to control overall speed
-		double max_speed = 0.25;										// rad/s
+		double max_speed = 0.25;									// rad/s
 		trajectory_duration = std::max(max_error / max_speed, 5.0); // Minimum 5 seconds
 
-		// Store start positions and calculate coefficients for each joint
+		// Calculate coefficients for each joint
 		for (int i = 0; i < 6; i++)
 		{
-			trajectory_start_positions[i] = current_joints[i];
 			coeffs[i] = get_coeffs(
 				current_joints[i],
 				demanded_joints[i],
+				current_velocities[i],
 				trajectory_duration);
+
+			// Reset PID Memory
+			errors_integral[i] = 0.0;
+			errors_prev[i] = 0.0;
 		}
 
 		// Record start time
@@ -173,6 +197,8 @@ private:
 		{
 			return;
 		}
+
+		std::lock_guard<std::mutex> lock(trajectory_mutex);
 
 		std::vector<double> velocities(6, 0.0);
 
@@ -218,23 +244,47 @@ private:
 		// Calculate desired velocities from quintic trajectory
 		for (int i = 0; i < 6; i++)
 		{
-			velocities[i] = get_velocity(coeffs[i], elapsed) + kp * (get_position(coeffs[i], elapsed) - current_joints[i]);
+			double error = get_position(coeffs[i], elapsed) - current_joints[i];
+
+			// Proportional Term
+			double P = kp * error;
+
+			// Integral Term
+			errors_integral[i] += error * dt;
+			errors_integral[i] = std::clamp(errors_integral[i], -integral_limit, integral_limit);
+			double I = ki * errors_integral[i];
+
+			// Derivative Term
+			double D = kd * (error - errors_prev[i]) / dt;
+
+			// Feedforward Term
+			double feedforward_vel = get_velocity(coeffs[i], elapsed);
+
+			velocities[i] = feedforward_vel + P + I + D;
+			errors_prev[i] = error;
 		}
 
 		send_msg(velocities);
 	}
 
+	std::mutex trajectory_mutex;
+
 	double kp;
+	double ki;
+	double kd;
 	double dt;
+	float integral_limit;
 
 	bool known_states = false;
 	bool known_demands = false;
 	bool trajectory_active = false;
 
 	std::vector<float> current_joints;
+	std::vector<float> current_velocities;
 	std::vector<float> demanded_joints;
-	std::vector<float> trajectory_start_positions;
 	std::vector<PolynomialCoeffs> coeffs;
+	std::vector<float> errors_prev;
+	std::vector<float> errors_integral;
 
 	rclcpp::Time trajectory_start_time;
 	double trajectory_duration;
