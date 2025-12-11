@@ -1,4 +1,4 @@
-mover6=importrobot("CPMOVER6 (4).urdf")
+mover6=importrobot("CPMOVER6.urdf")
 mover6.show
 
 %Task 3

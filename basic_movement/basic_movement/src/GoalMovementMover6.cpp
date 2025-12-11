@@ -81,8 +81,8 @@ public:
 	{
 		// PID gains
 		kp_ = 3.5;	// Proportional gain
-		ki_ = 0.1;	// Integral gain
-		kd_ = 0.5;	// Derivative gain
+		ki_ = 0.5;	// Integral gain
+		kd_ = 0.2;	// Derivative gain
 		dt_ = 0.01; // Time step for control loop (seconds)
 		errors_prev_.resize(6, 0.0f);
 		errors_integral_.resize(6, 0.0f);

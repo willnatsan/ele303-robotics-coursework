@@ -1,4 +1,4 @@
-node = ros2node("/french_bread_multi", 37);
+node = ros2node("/french_bread_multi", 44);
 joint_trajectory_pub = ros2publisher(node, "/joint_trajectory", "trajectory_msgs/JointTrajectory");
 joint_trajectory_msg = ros2message(joint_trajectory_pub);
 
