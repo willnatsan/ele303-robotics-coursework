@@ -79,7 +79,7 @@ public:
 	GoalMovementMover6()
 		: Node("GoalMovementMover6"), count_(0)
 	{
-		// PID gains
+		// PID gains (@ 75% Override)
 		kp_ = 3.5;	// Proportional gain
 		ki_ = 0.5;	// Integral gain
 		kd_ = 0.2;	// Derivative gain
