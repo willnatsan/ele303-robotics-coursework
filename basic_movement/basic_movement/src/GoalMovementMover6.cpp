@@ -119,6 +119,7 @@ public:
 
 		// Create publisher
 		publisherJointPosition_ = this->create_publisher<control_msgs::msg::JointJog>("/JointJog", 10);
+		publisherDesiredJointStates_ = this->create_publisher<sensor_msgs::msg::JointState>("/desired_joint_states", 10);
 
 		// Create subscriptions
 		subscriptionJointPosition_ = this->create_subscription<sensor_msgs::msg::JointState>(
@@ -704,6 +705,7 @@ private:
 
 	void run_PID(const std::vector<double> &desired_pos, const std::vector<double> &desired_vel, std::vector<double> &command_vel)
 	{
+
 		// Apply PID control with feedforward
 		for (int i = 0; i < 6; i++)
 		{
@@ -724,6 +726,13 @@ private:
 			command_vel[i] = desired_vel[i] + P + I + D;
 			errors_prev_[i] = error;
 		}
+
+		auto desired_joints_msg = sensor_msgs::msg::JointState();
+		desired_joints_msg.name = {"joint1", "joint2", "joint3", "joint4", "joint5", "joint6"};
+		desired_joints_msg.position = desired_pos;
+		desired_joints_msg.velocity = desired_vel;
+
+		publisherDesiredJointStates_->publish(desired_joints_msg);
 	}
 
 	std::mutex trajectory_mutex;
@@ -771,6 +780,7 @@ private:
 	rclcpp::CallbackGroup::SharedPtr tm_group_;
 	rclcpp::TimerBase::SharedPtr timer_;
 	rclcpp::Publisher<control_msgs::msg::JointJog>::SharedPtr publisherJointPosition_;
+	rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr publisherDesiredJointStates_;
 	rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr subscriptionJointPosition_;
 	rclcpp::Subscription<std_msgs::msg::Float32MultiArray>::SharedPtr subscriptionJointDemands_;
 	rclcpp::Subscription<trajectory_msgs::msg::JointTrajectory>::SharedPtr subscriptionWaypoints_;
