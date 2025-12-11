@@ -21,15 +21,13 @@ find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(control_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
-# uncomment the following section in order to fill in
-# further dependencies manually.
-# find_package(<dependency> REQUIRED)
+find_package(trajectory_msgs REQUIRED)
 
 add_executable(BasicMovement src/BasicMovement.cpp)
 ament_target_dependencies(BasicMovement rclcpp std_msgs control_msgs)
 
 add_executable(GoalMovementMover6 src/GoalMovementMover6.cpp)
-ament_target_dependencies(GoalMovementMover6 rclcpp std_msgs control_msgs sensor_msgs)
+ament_target_dependencies(GoalMovementMover6 rclcpp std_msgs control_msgs sensor_msgs trajectory_msgs)
 
 
 install(TARGETS
