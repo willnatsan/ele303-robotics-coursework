@@ -14,12 +14,12 @@ positions = [home; via1; via2; via3; via4; via5; via4; via3; via2; via1; home;];
 for i = 1:11
     joint_trajectory_point_msg = ros2message("trajectory_msgs/JointTrajectoryPoint");
     for j = 1:6
-        joint_trajectory_point_msg.positions = cat(2, joint_trajectory_point_msg.positions, positions(i, j).JointPosition);
+        joint_trajectory_point_msg.positions = cat(2, joint_trajectory_point_msg.positions, positions(i, j).JointPosition)
     end
-    joint_trajectory_msg.points(i) = joint_trajectory_point_msg;
+    joint_trajectory_msg.points = cat(joint_trajectory_msg.points, joint_trajectory_point_msg);
 end
 
-send(joint_trajectory_pub, joint_trajectory_msg);
+% send(joint_trajectory_pub, joint_trajectory_msg);
 
 
 function [configSoln] = IKSolver(X,Y,Z,A,B,C)
