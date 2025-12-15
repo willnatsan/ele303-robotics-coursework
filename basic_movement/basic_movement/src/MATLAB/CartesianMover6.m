@@ -6,8 +6,8 @@ home = IKSolver(0.345, 0, 0.4425, 0, pi/2, 0);
 config = IKSolver(0.5, 0, 0.2, 0, pi/2, 0);
 
 for i = 1:6
-    joint_msg.data(i) = config(i).JointPosition;
-    % joint_msg.data(i) = home(i).JointPosition;
+    % joint_msg.data(i) = config(i).JointPosition;
+    joint_msg.data(i) = home(i).JointPosition;
 end
 
 send(joint_pub, joint_msg);
