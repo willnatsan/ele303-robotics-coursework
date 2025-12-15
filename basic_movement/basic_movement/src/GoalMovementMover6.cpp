@@ -126,9 +126,9 @@ public:
 		subscriptionJointDemands_ = this->create_subscription<std_msgs::msg::Float32MultiArray>(
 			"/joint_demands", 10,
 			std::bind(&GoalMovementMover6::topic_jointDemandsCallback, this, _1), options);
-		subscriptionWaypoints_ = this->create_subscription<trajectory_msgs::msg::JointTrajectory>(
+		subscriptionJointTrajectory_ = this->create_subscription<trajectory_msgs::msg::JointTrajectory>(
 			"/joint_trajectory", 10,
-			std::bind(&GoalMovementMover6::topic_viapointsCallback, this, _1), options);
+			std::bind(&GoalMovementMover6::topic_jointTrajectoryCallback, this, _1), options);
 
 		// Create timer for control loop (wall timer fires regardless of use_sim_time)
 		timer_ = this->create_wall_timer(10ms,
@@ -476,7 +476,7 @@ private:
 		start_single_trajectory();
 	}
 
-	void topic_viapointsCallback(const trajectory_msgs::msg::JointTrajectory::SharedPtr msg)
+	void topic_jointTrajectoryCallback(const trajectory_msgs::msg::JointTrajectory::SharedPtr msg)
 	{
 		if (msg->points.size() < 1)
 		{
@@ -805,7 +805,7 @@ private:
 	rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr publisherDesiredJointStates_;
 	rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr subscriptionJointPosition_;
 	rclcpp::Subscription<std_msgs::msg::Float32MultiArray>::SharedPtr subscriptionJointDemands_;
-	rclcpp::Subscription<trajectory_msgs::msg::JointTrajectory>::SharedPtr subscriptionWaypoints_;
+	rclcpp::Subscription<trajectory_msgs::msg::JointTrajectory>::SharedPtr subscriptionJointTrajectory_;
 	size_t count_;
 };
 
