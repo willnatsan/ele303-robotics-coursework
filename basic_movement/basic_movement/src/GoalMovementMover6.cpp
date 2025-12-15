@@ -116,7 +116,7 @@ public:
 		options.callback_group = cb_group_;
 
 		// Create publisher
-		publisherJointPosition_ = this->create_publisher<control_msgs::msg::JointJog>("/JointJog", 10);
+		publisherJointJog_ = this->create_publisher<control_msgs::msg::JointJog>("/JointJog", 10);
 		publisherDesiredJointStates_ = this->create_publisher<sensor_msgs::msg::JointState>("/desired_joint_states", 10);
 
 		// Create subscriptions
@@ -605,7 +605,7 @@ private:
 		msg.joint_names = {"joint1", "joint2", "joint3", "joint4", "joint5", "joint6"};
 		msg.velocities = vels;
 
-		publisherJointPosition_->publish(msg);
+		publisherJointJog_->publish(msg);
 	}
 
 	void move_my_robot()
@@ -801,7 +801,7 @@ private:
 	rclcpp::CallbackGroup::SharedPtr cb_group_;
 	rclcpp::CallbackGroup::SharedPtr tm_group_;
 	rclcpp::TimerBase::SharedPtr timer_;
-	rclcpp::Publisher<control_msgs::msg::JointJog>::SharedPtr publisherJointPosition_;
+	rclcpp::Publisher<control_msgs::msg::JointJog>::SharedPtr publisherJointJog_;
 	rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr publisherDesiredJointStates_;
 	rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr subscriptionJointPosition_;
 	rclcpp::Subscription<std_msgs::msg::Float32MultiArray>::SharedPtr subscriptionJointDemands_;
