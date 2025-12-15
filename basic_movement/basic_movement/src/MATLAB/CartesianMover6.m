@@ -1,13 +1,13 @@
-node = ros2node("/french_bread", 44);
+node = ros2node("/french_bread", 193);
 joint_pub = ros2publisher(node, "/joint_demands", "std_msgs/Float32MultiArray");
 joint_msg = ros2message(joint_pub);
 
 home = IKSolver(0.345, 0, 0.4425, 0, pi/2, 0);
-config = IKSolver(0.5, 0, 0.25, 0, pi/2, 0);
+config = IKSolver(0.345, 0, 0.4425, 0, pi/2, 0);
 
 for i = 1:6
-    % joint_msg.data(i) = config(i).JointPosition;
-    joint_msg.data(i) = home(i).JointPosition;
+    joint_msg.data(i) = config(i).JointPosition;
+    % joint_msg.data(i) = home(i).JointPosition;
 end
 
 send(joint_pub, joint_msg);

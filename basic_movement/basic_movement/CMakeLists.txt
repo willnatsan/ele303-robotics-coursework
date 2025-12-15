@@ -29,14 +29,13 @@ ament_target_dependencies(BasicMovement rclcpp std_msgs control_msgs)
 add_executable(GoalMovementMover6 src/GoalMovementMover6.cpp)
 ament_target_dependencies(GoalMovementMover6 rclcpp std_msgs control_msgs sensor_msgs trajectory_msgs)
 
+add_executable(JointJogGazeboAdapter src/JointJogGazeboAdapter.cpp)
+ament_target_dependencies(JointJogGazeboAdapter rclcpp std_msgs control_msgs)
 
 install(TARGETS
   BasicMovement
-  DESTINATION lib/${PROJECT_NAME})
-
-
-install(TARGETS
   GoalMovementMover6
+  JointJogGazeboAdapter
   DESTINATION lib/${PROJECT_NAME})
 
 if(BUILD_TESTING)

@@ -79,20 +79,20 @@ public:
 	GoalMovementMover6()
 		: Node("GoalMovementMover6"), count_(0)
 	{
-		// PID gains (@ 75% Override)
-		kp_ = 3.5;	// Proportional gain
-		ki_ = 0.5;	// Integral gain
+		// PID gains (tuned for faster convergence)
+		kp_ = 8.0;	// Proportional gain
+		ki_ = 1.5;	// Integral gain
 		kd_ = 0.2;	// Derivative gain
 		dt_ = 0.01; // Time step for control loop (seconds)
 		errors_prev_.resize(6, 0.0f);
 		errors_integral_.resize(6, 0.0f);
-		integral_limit_ = 1.0 / ki_;
+		integral_limit_ = 2.5; // Fixed anti-windup limit
 
 		// Declare ROS parameters for trajectory configuration
 		this->declare_parameter("max_velocity", 0.25);
 		this->declare_parameter("max_acceleration", 0.5);
 		this->declare_parameter("max_jerk", 1.0);
-		this->declare_parameter("min_blend_time", 0.1);
+		this->declare_parameter("min_blend_time", 0.5);
 		this->declare_parameter("min_segment_time", 0.5);
 
 		// Load parameters
@@ -102,14 +102,12 @@ public:
 		min_blend_time_ = this->get_parameter("min_blend_time").as_double();
 		min_segment_time_ = this->get_parameter("min_segment_time").as_double();
 
-		RCLCPP_INFO(this->get_logger(), "Trajectory params: max_vel=%.2f, max_accel=%.2f, max_jerk=%.2f",
-					max_velocity_, max_acceleration_, max_jerk_);
-
 		// Initialize state vectors
 		current_joints_.resize(6, 0.0f);
 		current_velocities_.resize(6, 0.0f);
 		demanded_joints_.resize(6, 0.0f);
 		coeffs_.resize(6);
+		joint_active_.resize(6, false);
 
 		// Create callback groups
 		cb_group_ = this->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
@@ -132,10 +130,9 @@ public:
 			"/joint_trajectory", 10,
 			std::bind(&GoalMovementMover6::topic_viapointsCallback, this, _1), options);
 
-		// Create timer for control loop
-		timer_ = this->create_wall_timer(10ms, std::bind(&GoalMovementMover6::timer_callback, this), tm_group_);
-
-		RCLCPP_INFO(this->get_logger(), "GoalMovementMover6 initialized with via point support");
+		// Create timer for control loop (wall timer fires regardless of use_sim_time)
+		timer_ = this->create_wall_timer(10ms,
+										 std::bind(&GoalMovementMover6::timer_callback, this), tm_group_);
 	}
 
 private:
@@ -312,7 +309,8 @@ private:
 					blend.type = TrajectorySegment::Type::BLEND;
 
 					// Blend starts half-blend before reaching the via point
-					double time_at_via = global_time;
+					// time_at_via is when we reach via point k+1 (not global_time which is at k)
+					double time_at_via = global_time + via_points[blend_idx].segment_duration;
 					blend.start_time = time_at_via - via_points[blend_idx].blend_time / 2.0;
 					blend.duration = via_points[blend_idx].blend_time;
 
@@ -415,25 +413,33 @@ private:
 
 	void topic_jointStatesCallback(const sensor_msgs::msg::JointState::SharedPtr msg)
 	{
-		if (msg->position.size() < 6)
+		// Joint names we're looking for (in order: joint1=index0, joint2=index1, etc.)
+		static const std::vector<std::string> joint_names = {
+			"joint1", "joint2", "joint3", "joint4", "joint5", "joint6"};
+
+		bool velocity_flag = (msg->velocity.size() >= msg->position.size());
+
+		// Match joints by name, not by index
+		for (size_t i = 0; i < joint_names.size(); i++)
 		{
-			return;
+			for (size_t j = 0; j < msg->name.size(); j++)
+			{
+				if (msg->name[j] == joint_names[i])
+				{
+					if (j < msg->position.size())
+					{
+						current_joints_[i] = msg->position[j];
+					}
+					if (velocity_flag && j < msg->velocity.size())
+					{
+						current_velocities_[i] = msg->velocity[j];
+					}
+					break;
+				}
+			}
 		}
 
-		double velocity_flag = false;
-		// Get current velocity if available
-		if (msg->velocity.size() >= 6)
-		{
-			velocity_flag = true;
-		}
-
-		for (int i = 0; i < 6; i++)
-		{
-			current_joints_[i] = msg->position[i];
-			current_velocities_[i] = (velocity_flag) ? msg->velocity[i] : 0.0;
-		}
 		known_states_ = true;
-		// RCLCPP_INFO(this->get_logger(),"Received State %f\t%f\t%f\t%f\t%f\t%f", joint1_angle, joint2_angle, joint3_angle, joint4_angle, joint5_angle, joint6_angle);
 	}
 
 	void topic_jointDemandsCallback(const std_msgs::msg::Float32MultiArray::SharedPtr msg)
@@ -520,6 +526,10 @@ private:
 		// Calculate polynomial coefficients for each joint
 		for (int i = 0; i < 6; i++)
 		{
+			// Mark joint as active only if it needs to move significantly
+			double joint_error = std::abs(demanded_joints_[i] - current_joints_[i]);
+			joint_active_[i] = (joint_error > 0.01); // 0.01 rad threshold (~0.5 degrees)
+
 			coeffs_[i] = get_coeffs(
 				current_joints_[i],
 				demanded_joints_[i],
@@ -591,6 +601,7 @@ private:
 	void send_msg(const std::vector<double> &vels)
 	{
 		auto msg = control_msgs::msg::JointJog();
+		msg.header.frame_id = ""; // Initialize to prevent DDS serialization errors
 		msg.joint_names = {"joint1", "joint2", "joint3", "joint4", "joint5", "joint6"};
 		msg.velocities = vels;
 
@@ -630,7 +641,6 @@ private:
 
 	void execute_single_trajectory(std::vector<double> &velocities)
 	{
-		// Calculate elapsed time
 		double elapsed = (this->now() - trajectory_start_time_).seconds();
 
 		// Check if trajectory is complete
@@ -663,6 +673,7 @@ private:
 		// Get desired position and velocity from single trajectory
 		std::vector<double> desired_pos, desired_vel;
 		evaluate_single_trajectory(elapsed, desired_pos, desired_vel);
+
 		run_PID(desired_pos, desired_vel, velocities);
 	}
 
@@ -705,10 +716,16 @@ private:
 
 	void run_PID(const std::vector<double> &desired_pos, const std::vector<double> &desired_vel, std::vector<double> &command_vel)
 	{
-
 		// Apply PID control with feedforward
 		for (int i = 0; i < 6; i++)
 		{
+			// Only control joints that are actively moving in the trajectory
+			if (!joint_active_[i])
+			{
+				command_vel[i] = 0.0; // Don't command inactive joints
+				continue;
+			}
+
 			double error = desired_pos[i] - current_joints_[i];
 
 			// Proportional Term
@@ -724,6 +741,10 @@ private:
 
 			// Feedforward Term + PID
 			command_vel[i] = desired_vel[i] + P + I + D;
+
+			// Clamp output velocity to prevent runaway
+			command_vel[i] = std::clamp(command_vel[i], -max_velocity_ * 3.0, max_velocity_ * 3.0);
+
 			errors_prev_[i] = error;
 		}
 
@@ -766,6 +787,7 @@ private:
 	std::vector<PolynomialCoeffs> coeffs_;
 	rclcpp::Time trajectory_start_time_;
 	double trajectory_duration_;
+	std::vector<bool> joint_active_; // Track which joints should move
 
 	// Multi-segment trajectory data
 	MultiSegmentTrajectory multi_trajectory_;
@@ -790,12 +812,7 @@ private:
 int main(int argc, char *argv[])
 {
 	rclcpp::init(argc, argv);
-	// auto node = rclcpp::Node::make_shared("GoalMovementMover6");
-	auto node = std::make_shared<GoalMovementMover6>();
-	rclcpp::executors::MultiThreadedExecutor executor;
-	executor.add_node(node);
-	executor.spin();
-	// rclcpp::spin(std::make_shared<GoalMovementMover6>());
+	rclcpp::spin(std::make_shared<GoalMovementMover6>());
 	rclcpp::shutdown();
 	return 0;
 }

@@ -1,4 +1,4 @@
-node = ros2node("/french_bread_multi", 44);
+node = ros2node("/french_bread_multi", 193);
 joint_trajectory_pub = ros2publisher(node, "/joint_trajectory", "trajectory_msgs/JointTrajectory");
 joint_trajectory_msg = ros2message(joint_trajectory_pub);
 
@@ -9,7 +9,7 @@ via3 = IKSolver(0.345, 0, 0.3, 0, pi/2, 0);
 via4 = IKSolver(0.345, 0, 0.25, 0, pi/2, 0);
 via5 = IKSolver(0.345, 0, 0.2, 0, pi/2, 0);
 
-positions = [home; via1; via2; via3; via4; via5];
+positions = [home; via1; via2; via3; via4; via5; via4; via3; via2; via1; home];
 
 for i = 1:length(positions)
     joint_trajectory_point_msg = ros2message("trajectory_msgs/JointTrajectoryPoint");
