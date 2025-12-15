@@ -80,9 +80,9 @@ public:
 		: Node("GoalMovementMover6"), count_(0)
 	{
 		// PID gains (tuned for faster convergence)
-		kp_ = 8.0;	// Proportional gain
+		kp_ = 10.0; // Proportional gain
 		ki_ = 1.5;	// Integral gain
-		kd_ = 0.2;	// Derivative gain
+		kd_ = 0.1;	// Derivative gain
 		dt_ = 0.01; // Time step for control loop (seconds)
 		errors_prev_.resize(6, 0.0f);
 		errors_integral_.resize(6, 0.0f);
@@ -521,7 +521,7 @@ private:
 		}
 
 		// Set trajectory duration based on max error (use configurable max_velocity_)
-		trajectory_duration_ = std::max(max_error / max_velocity_, 5.0); // Minimum 5 seconds
+		trajectory_duration_ = std::max(max_error / max_velocity_, 10.0); // Minimum 10 seconds
 
 		// Calculate polynomial coefficients for each joint
 		for (int i = 0; i < 6; i++)
